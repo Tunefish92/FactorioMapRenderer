@@ -53,7 +53,8 @@ if [ "$(id -u)" = "0" ]; then
     PUID="${PUID:-1000}"
     PGID="${PGID:-1000}"
 
-    mkdir -p "$DATA_PATH/home"
+    # created here, before the folder is handed over: run_app below still runs as root
+    mkdir -p "$DATA_PATH/home" "$DATA_PATH/mods"
 
     # Only walk the whole tree when the top folder isn't ours yet (first start, or PUID changed);
     # everything the app creates afterwards already has the right owner.
@@ -61,7 +62,7 @@ if [ "$(id -u)" = "0" ]; then
         echo "Setting owner of $DATA_PATH to $PUID:$PGID"
         chown -R "$PUID:$PGID" "$DATA_PATH"
     fi
-    chown "$PUID:$PGID" "$DATA_PATH/home"
+    chown "$PUID:$PGID" "$DATA_PATH/home" "$DATA_PATH/mods"
 
     run_app setpriv --reuid="$PUID" --regid="$PGID" --clear-groups dotnet /app/FactorioMapRenderer.dll
 fi

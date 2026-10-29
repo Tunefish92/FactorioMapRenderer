@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Factorio-Map-Renderer</Name>
+  <Repository>tunefish92/factoriomaprenderer:latest</Repository>
+  <Registry>https://hub.docker.com/r/tunefish92/factoriomaprenderer</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/Tunefish92/FactorioMapRenderer/discussions</Support>
+  <Project>https://github.com/Tunefish92/FactorioMapRenderer</Project>
+  <ReadMe>https://github.com/Tunefish92/FactorioMapRenderer#readme</ReadMe>
+  <Overview>Interactive map of your Factorio save game. Shows every planet and space platform: zoomed out in the colours of the game's map view, zoomed in in the game's own graphics and ground textures, plus the solar system with every planet and platform. The factory (buildings, belts, pipes, rails, power), resources and patches, enemy bases, players, train stops, map tags and production statistics, with search and click-to-inspect.&#xD;
+&#xD;
+The save game is chosen in the web UI by an admin: upload a save .zip, take the newest save from a folder (e.g. your Factorio server's saves, mounted at /saves) or copy it over SSH. With the server's RCON the running game is saved first, and a Server tab shows the server's state. A "Refresh snapshot" button fetches the current state again. Visitors only see the map.&#xD;
+&#xD;
+The game reads the save: Factorio's free headless server comes with the image. Icons, names, sprites, ground textures and the star map (Factorio 2.1.23 with Space Age) are included; the page loads nothing from other sites.</Overview>
+  <Category>GameServers: Tools:Utilities</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/Tunefish92/unraid-templates/main/templates/factorio-map-renderer.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Tunefish92/FactorioMapRenderer/main/unraid/factorio-map-renderer.png</Icon>
+  <License>MIT</License>
+  <Screenshot>https://raw.githubusercontent.com/Tunefish92/FactorioMapRenderer/main/docs/screenshots/overview.jpg</Screenshot>
+  <Screenshot>https://raw.githubusercontent.com/Tunefish92/FactorioMapRenderer/main/docs/screenshots/factory.jpg</Screenshot>
+  <Screenshot>https://raw.githubusercontent.com/Tunefish92/FactorioMapRenderer/main/docs/screenshots/statistics-dark.jpg</Screenshot>
+  <ExtraSearchTerms>factorio map save savegame server factory interactive space age</ExtraSearchTerms>
+
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="Port the map is served on." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+
+  <Config Name="Data Path" Target="/data" Default="/mnt/user/appdata/factorio-map-renderer" Mode="rw" Description="The rendered map, mods, the downloaded headless server and the save game source settings (including the RCON password)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/factorio-map-renderer</Config>
+
+  <Config Name="Admin Password" Target="FMR_ADMIN_PASSWORD" Default="" Mode="" Description="Required, at least 8 characters. Only admins who log in with it (Save game tab of the side panel) can choose or refresh the save game." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+
+  <Config Name="Server Saves" Target="/saves" Default="" Mode="ro" Description="Optional: the saves folder of your Factorio server, e.g. /mnt/user/appdata/factorio/saves. Choose 'Folder' with the path /saves in the map." Type="Path" Display="always" Required="false" Mask="false"></Config>
+
+  <Config Name="Game Folder" Target="/game" Default="" Mode="ro" Description="Optional, normally not needed. A Factorio for Linux (the folder with bin and data): reads the saves instead of the downloaded headless server and gives the map the icons and names of exactly your game." Type="Path" Display="advanced" Required="false" Mask="false"></Config>
+
+  <Config Name="Download Newer Headless Server" Target="FMR_DOWNLOAD_HEADLESS" Default="true" Mode="" Description="For saves newer than the headless server in the image, download a newer one from factorio.com (once per version). false never contacts factorio.com." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+
+  <Config Name="Max Zoom" Target="FMR_MAX_ZOOM" Default="9" Mode="" Description="Highest rendered zoom level, 5 to 10. 9 is 16 pixels per game tile; each level less renders about four times faster and needs a quarter of the disk space." Type="Variable" Display="advanced" Required="false" Mask="false">9</Config>
+
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID that owns the data path; the app runs as this user. Unraid default: 99 (nobody)." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID that owns the data path. Unraid default: 100 (users)." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>

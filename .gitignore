@@ -1,0 +1,19 @@
+bin/
+obj/
+.vs/
+*.user
+output/
+*_map/
+TestResults/
+
+# The game and test saves stay local: the game is Wube Software's, saves are large.
+# (The parts of the game the map needs are exported into gamedata/.)
+/basegame/
+/savegame/
+
+# Docker
+.env
+.env.*
+!.env.example
+admin.env
+/map-data/

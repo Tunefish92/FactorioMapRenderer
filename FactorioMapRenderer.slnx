@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/FactorioMapRenderer.Tests/FactorioMapRenderer.Tests.csproj" />
+  </Folder>
+  <Project Path="src/FactorioMapRenderer/FactorioMapRenderer.csproj" />
+</Solution>

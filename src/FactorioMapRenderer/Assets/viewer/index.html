@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#e8902a">
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <title>Factorio Map</title>
+  <link rel="stylesheet" href="leaflet/leaflet.css">
+  <link rel="stylesheet" href="viewer.css">
+  <script>
+    // Applied before the first paint; "system" follows the browser's light/dark preference.
+    try { const t = JSON.parse(localStorage.getItem('fmr:theme')); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch { /* storage unavailable */ }
+  </script>
+</head>
+<body>
+  <aside id="sidebar">
+    <header>
+      <img class="logo" src="logo.svg" width="30" height="30" alt="">
+      <h1 id="title">Factorio Map</h1>
+      <button id="toggle-sidebar" title="Hide panel" aria-label="Hide panel">‹</button>
+    </header>
+    <a id="update-banner" target="_blank" rel="noopener" hidden>
+      <span class="update-dot" aria-hidden="true"></span>
+      <span><b>Update available</b> <span id="update-banner-version"></span></span>
+      <span class="update-banner-link">Release notes ↗</span>
+    </a>
+    <nav id="tabs" role="tablist" aria-label="Panel sections">
+      <button type="button" role="tab" data-tab="layers" aria-selected="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/></svg><span>Map</span></button>
+      <button type="button" role="tab" data-tab="save" aria-selected="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3h11l3 3v15H5Z"/><path d="M8 3v6h7V3"/><rect x="8" y="13" width="8" height="5"/></svg><span>Save game</span></button>
+      <button type="button" role="tab" data-tab="stats" aria-selected="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg><span>Statistics</span></button>
+      <button type="button" role="tab" data-tab="server" aria-selected="false" hidden><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span>Server</span></button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg><span>Settings</span></button>
+    </nav>
+    <div id="sidebar-content">
+      <div class="tab-panel" data-panel="layers" role="tabpanel">
+        <section id="surface-picker" class="surface-picker" hidden>
+          <div id="planets" class="planet-chips" role="radiogroup" aria-label="Planets"></div>
+          <details id="platforms" class="group platform-list" hidden>
+            <summary><span class="group-name">Space platforms</span><span id="platform-count" class="group-count"></span></summary>
+            <div id="platform-items"></div>
+          </details>
+        </section>
+        <input id="search" type="search" placeholder="Search train stops, tags, players, resources, buildings…" autocomplete="off">
+        <ul id="search-results"></ul>
+        <div id="layers"></div>
+        <p class="hint">Tick a layer to show it; the arrow opens its legend. Click buildings, markers or resource patches on the map for details.</p>
+      </div>
+
+      <div class="tab-panel" data-panel="save" role="tabpanel" hidden>
+        <div id="admin-session" class="admin-session" hidden>
+          <span class="admin-badge"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 5 6v6c0 4.4 3 7.6 7 9 4-1.4 7-4.6 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>Signed in as admin</span>
+          <button type="button" id="admin-logout" class="logout"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H4"/></svg>Log out</button>
+        </div>
+        <section id="source" class="card" hidden>
+          <h2>Source</h2>
+          <div id="source-current" class="source-current"></div>
+          <div id="source-status" class="source-status" role="status" hidden></div>
+          <div id="source-offline" class="hint" hidden>Start the renderer with <code>--serve</code> and open the page from there to choose the save game here.</div>
+          <div id="source-controls" hidden>
+            <div class="drop-zone">
+              <span>Drop a save <b>.zip</b> here or</span>
+              <button type="button" id="source-browse">Browse…</button>
+              <input type="file" id="source-file" accept=".zip" hidden>
+            </div>
+
+            <details id="source-folder">
+              <summary>Folder (e.g. a server's saves)</summary>
+              <form id="folder-form" class="source-form">
+                <label>Folder or save file<input id="folder-path" required placeholder="/saves" autocomplete="off"></label>
+                <div class="button-row">
+                  <button type="button" id="folder-save">Save settings</button>
+                  <button type="submit" class="primary">Load newest save</button>
+                </div>
+                <p class="hint">A folder on the machine the renderer runs on; in Docker, mount it, e.g. the saves folder of a Factorio server at <code>/saves</code>. The newest .zip below it is taken.</p>
+              </form>
+            </details>
+
+            <details id="source-ssh">
+              <summary>SSH</summary>
+              <form id="ssh-form" class="source-form">
+                <div class="field-row">
+                  <label>Target<input id="ssh-target" required placeholder="user@host" autocomplete="off"></label>
+                  <label class="narrow">Port<input id="ssh-port" type="number" min="1" max="65535" value="22"></label>
+                </div>
+                <label>Save file or folder<input id="ssh-path" required placeholder="/opt/factorio/saves" autocomplete="off"></label>
+                <div class="button-row">
+                  <button type="button" id="ssh-save">Save settings</button>
+                  <button type="submit" class="primary">Load over SSH</button>
+                </div>
+                <p class="hint">Uses this machine's <code>ssh</code> with your keys; passwords are not supported. For a folder, the newest .zip below it is taken.</p>
+              </form>
+            </details>
+
+            <details id="source-rcon">
+              <summary>Game server (RCON)</summary>
+              <form id="rcon-form" class="source-form">
+                <div class="field-row">
+                  <label>Host<input id="rcon-host" required placeholder="192.168.1.20" autocomplete="off"></label>
+                  <label class="narrow">Port<input id="rcon-port" type="number" min="1" max="65535" value="27015"></label>
+                </div>
+                <label>RCON password<input id="rcon-password" type="password" placeholder="from --rcon-password" autocomplete="off"></label>
+                <label class="check"><input type="checkbox" id="rcon-savefirst" checked> Save the running game before fetching it</label>
+                <div class="button-row">
+                  <button type="button" id="rcon-save">Save settings</button>
+                  <button type="submit" class="primary">Check connection</button>
+                </div>
+                <div id="server-info" class="server-info" hidden></div>
+                <p class="hint">Optional, together with a folder or SSH: the server saves the game first (<code>/server-save</code>), so the map shows it as it is now. It also brings the <em>Server</em> tab.</p>
+              </form>
+            </details>
+
+            <button type="button" id="source-refresh" class="primary wide" hidden>⟳ Refresh snapshot</button>
+            </div>
+        </section>
+
+        <section class="card" id="save-details">
+          <h2>Details</h2>
+          <table id="summary"></table>
+        </section>
+
+        <section id="admin" class="card admin-card" hidden>
+          <div class="admin-head">
+            <span class="admin-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+            <div>
+              <h2>Admin</h2>
+              <p>Log in to choose or refresh the save game.</p>
+            </div>
+          </div>
+          <form id="admin-form" class="source-form">
+            <label for="admin-password">Password</label>
+            <div class="password-field">
+              <input id="admin-password" type="password" required autocomplete="current-password" placeholder="Admin password">
+              <button type="button" id="admin-reveal" title="Show password" aria-label="Show password" aria-pressed="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
+            <button type="submit" id="admin-submit" class="primary wide">Log in</button>
+            <div id="admin-error" class="source-status" data-kind="error" role="alert" hidden></div>
+          </form>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-panel="stats" role="tabpanel" hidden>
+        <section class="card">
+          <h2>Produced <span id="stats-surface" class="muted"></span></h2>
+          <input id="production-filter" type="search" placeholder="Filter, e.g. plate…" autocomplete="off">
+          <table id="production" class="icon-table"></table>
+          <p class="hint">Everything made on this surface since the game started, from the game's production statistics.</p>
+        </section>
+        <section class="card">
+          <h2>Object counts</h2>
+          <input id="count-filter" type="search" placeholder="Filter, e.g. assembling…" autocomplete="off">
+          <table id="counts" class="icon-table"></table>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-panel="server" role="tabpanel" hidden>
+        <section class="card">
+          <h2>Game server <span id="server-health" class="pill" hidden></span></h2>
+          <p id="server-error" class="server-error" hidden></p>
+          <table id="server-state" class="server-table"></table>
+          <p class="hint"><span id="server-updated"></span></p>
+        </section>
+        <section class="card" id="server-admin" hidden>
+          <h2>Console <span class="pill">Admin</span></h2>
+          <form id="server-command-form">
+            <label for="server-command">Command</label>
+            <div class="server-command-row">
+              <input id="server-command" type="text" placeholder="e.g. /players" autocomplete="off" spellcheck="false">
+              <button type="submit" class="primary">Run</button>
+            </div>
+          </form>
+          <pre id="server-output" class="server-output" hidden></pre>
+          <details id="server-list" class="server-list">
+            <summary>Commands</summary>
+            <ul id="server-list-items"></ul>
+            <p class="hint">Click an entry to put it into the command line. Text without a leading <code>/</code> is sent to the chat. Lua commands (<code>/c</code>, <code>/sc</code>) switch off achievements in that save.</p>
+          </details>
+          <div class="server-buttons">
+            <button type="button" id="server-save-now">Save now</button>
+            <button type="button" id="server-stop" class="danger">Stop server</button>
+          </div>
+          <p class="hint">Stop server saves and quits (<code>/quit</code>). It comes back by itself only if its host restarts it (a Docker restart policy, a service).</p>
+        </section>
+      </div>
+
+      <div class="tab-panel" data-panel="settings" role="tabpanel" hidden>
+        <section class="card">
+          <h2>Map</h2>
+          <label class="option"><input type="checkbox" id="opt-labels" checked> Show names of train stops, tags &amp; players</label>
+          <label class="option"><input type="checkbox" id="opt-grid" checked> Show the chunk grid when zoomed in</label>
+          <label class="option"><input type="checkbox" id="opt-alt" checked> Alt mode: recipes, mined ore and filters on the buildings</label>
+          <p class="hint">Coordinates are game tiles, as in the game's map; a chunk is 32 × 32 tiles.</p>
+        </section>
+        <section class="card">
+          <h2>Appearance</h2>
+          <div class="option select-row">
+            <label for="opt-theme">Theme</label>
+            <select id="opt-theme">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
+        </section>
+        <section class="card" id="about" hidden>
+          <h2>Updates</h2>
+          <div id="update-status" class="update-status" data-state="unknown">
+            <span class="pill" id="update-pill"></span>
+            <span id="update-text"></span>
+          </div>
+          <label class="option"><input type="checkbox" id="opt-updates"> Check for updates on GitHub</label>
+          <label class="option"><input type="checkbox" id="opt-prereleases"> Include pre-releases <span class="muted">(beta versions)</span></label>
+          <div class="button-row"><button type="button" id="update-check">Check now</button></div>
+        </section>
+      </div>
+    </div>
+    <footer id="sidebar-footer">
+      <span id="footer-version"></span>
+      <span>© <span id="footer-years">2026</span> by <a href="https://github.com/Tunefish92" target="_blank" rel="noopener">Tunefish</a></span>
+    </footer>
+  </aside>
+  <button id="show-sidebar" title="Show panel" aria-label="Show panel">☰</button>
+  <main id="map"></main>
+  <nav id="surface-bar" aria-label="Planets" hidden></nav>
+  <div id="statusbar" hidden>
+    <div class="status-name"><span id="status-session"></span><span id="status-save" class="muted"></span></div>
+    <div class="status-meta"><span id="status-source" class="pill" hidden></span><span id="status-time"></span></div>
+    <button type="button" id="status-refresh" title="Refresh snapshot" aria-label="Refresh snapshot" hidden>⟳</button>
+  </div>
+  <div id="news-modal" role="dialog" aria-modal="true" aria-labelledby="news-title" hidden>
+    <div class="news-card">
+      <header>
+        <img class="load-logo" src="logo.svg" width="52" height="52" alt="">
+        <div>
+          <p class="news-kicker">Updated</p>
+          <h2 id="news-title">What is new</h2>
+        </div>
+        <button type="button" id="news-close" class="news-x" aria-label="Close">×</button>
+      </header>
+      <p id="news-render" class="news-render" hidden></p>
+      <div id="news-body" class="news-body"></div>
+      <footer>
+        <a id="news-link" target="_blank" rel="noopener">Full changelog</a>
+        <button type="button" id="news-ok" class="primary">Got it</button>
+      </footer>
+    </div>
+  </div>
+  <div id="placeholder" hidden>
+    <div class="placeholder-card">
+      <img class="placeholder-logo" src="logo.svg" width="88" height="88" alt="">
+      <h2>No map yet</h2>
+      <p id="placeholder-text">No save game has been loaded so far.</p>
+      <button type="button" id="placeholder-browse" class="primary" hidden>Choose a save file…</button>
+      <ul id="placeholder-steps" hidden>
+        <li><b>Drop</b> a save <code>.zip</code> anywhere on this page</li>
+        <li>or load it from a <b>folder</b> or over <b>SSH</b> in the panel on the left</li>
+      </ul>
+    </div>
+  </div>
+  <div id="cursor"></div>
+
+  <script src="render.js"></script>
+  <script src="leaflet/leaflet.js"></script>
+  <script src="map-data.js"></script>
+  <script src="version.js"></script>
+  <script src="closeup-draw.js"></script>
+  <script src="viewer.js"></script>
+  <script src="update.js"></script>
+  <script src="source.js"></script>
+  <script src="server.js"></script>
+</body>
+</html>

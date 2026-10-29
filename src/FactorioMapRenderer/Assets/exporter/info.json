@@ -1,0 +1,9 @@
+{
+  "name": "factorio-map-renderer-export",
+  "version": "1.0.0",
+  "title": "Factorio Map Renderer export",
+  "author": "Factorio Map Renderer",
+  "description": "Writes the loaded save's map (tiles, entities, players, map tags) to script-output for Factorio Map Renderer. Added to a save only for one benchmark tick; the save itself is never written.",
+  "factorio_version": "2.0",
+  "dependencies": ["base"]
+}

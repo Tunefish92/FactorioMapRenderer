@@ -619,6 +619,9 @@ body.empty .leaflet-control-container { display: none; }
 .status-name .muted { font: 400 12.5px var(--font-body); letter-spacing: 0; }
 .status-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
 #status-source { align-self: center; background: var(--color-primary-soft); color: var(--color-primary); }
+#status-untested { align-self: center; background: #fef3c7; color: #92400e; cursor: help; }
+:root[data-theme="dark"] #status-untested { background: #422006; color: #fcd34d; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #status-untested { background: #422006; color: #fcd34d; } }
 #status-source::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
 body.collapsed #statusbar { max-width: min(420px, calc(100vw - 80px)); }
 @media (max-width: 700px), (max-height: 500px) { #statusbar { max-width: calc(100vw - 70px); } body:not(.collapsed) #statusbar { display: none; } }

@@ -290,10 +290,10 @@ internal static class Program
                 Console.SetOut(console);
             }
         }
-        server = new MapServer(o.Output!, o.CacheDirectory, port, (savePath, progress) => Logged(() => Render(o, savePath, installed, game, progress)),
+        server = new MapServer(o.Output!, o.CacheDirectory, port, (savePath, saveName, progress) => Logged(() => Render(o, savePath, installed, game, progress, saveName)),
             console.WriteLine, o.Bind, o.AdminPassword);
 
-        string? renderAgain = null, reason = null;
+        string? renderAgain = null, renderName = null, reason = null;
         if (o.SavePath.Length > 0)
         {
             // The page is there at once and shows how the render of the given save goes.
@@ -314,7 +314,8 @@ internal static class Program
             if (renderedBy != HtmlExporter.Version)
                 File.WriteAllText(Path.Combine(o.Output!, HtmlExporter.UpdatedFromFile), renderedBy);
             HtmlExporter.RefreshViewer(o.Output!, game);
-            renderAgain = SaveToRenderAgain(o);
+            if (SaveToRenderAgain(o) is var (path, name))
+                (renderAgain, renderName) = (path, name);
             reason = "update";
         }
 
@@ -327,11 +328,11 @@ internal static class Program
         // The page is there at once; while the map is rendered it shows how far that has come, with the lines of
         // the console.
         if (renderAgain is not null)
-            _ = server.RenderAtStartAsync(reason!, Path.GetFileName(renderAgain), progress => Logged(() =>
+            _ = server.RenderAtStartAsync(reason!, renderName ?? Path.GetFileName(renderAgain), progress => Logged(() =>
             {
                 if (reason == "update")
                     Console.WriteLine($"The map on disk was rendered by another version; rendering it again from {renderAgain}");
-                Render(o, renderAgain, installed, game, progress);
+                Render(o, renderAgain, installed, game, progress, renderName);
             }), stop.Token);
         try
         {
@@ -345,23 +346,28 @@ internal static class Program
     }
 
     /// <summary>Names the version that rendered a map, so that a newer version knows the map is not its own.</summary>
-    private const string RenderedStamp = ".rendered";
+    private const string RenderedStamp = ".rendered", SourceStamp = ".rendered-from";
 
     /// <summary>
     /// A map on disk that another version rendered lacks what this version adds. The save it was made from is
     /// usually still in the cache: that one is to be rendered again.
     /// </summary>
-    private static string? SaveToRenderAgain(Options o)
+    /// <returns>The save the map on disk came from and its own name, if the map was made by another version.</returns>
+    private static (string Path, string Name)? SaveToRenderAgain(Options o)
     {
         string stamp = Path.Combine(o.Output!, RenderedStamp);
         if (File.Exists(stamp) && File.ReadAllText(stamp).Trim() == HtmlExporter.Version)
             return null;
-        var name = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(Path.Combine(o.Output!, "map-data.js")), "\"fileName\":\"([^\"]*)\"");
-        if (!name.Success || name.Groups[1].Value.Length == 0)
+        var match = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(Path.Combine(o.Output!, "map-data.js")), "\"fileName\":\"([^\"]*)\"");
+        string name = match.Success ? Path.GetFileName(System.Text.RegularExpressions.Regex.Unescape(match.Groups[1].Value)) : "";
+        // the file it was rendered from (a fetched save's snapshot); maps of 0.1.0 only have the save's name
+        string source = Path.Combine(o.Output!, SourceStamp);
+        string file = File.Exists(source) ? Path.GetFileName(File.ReadAllText(source).Trim()) : name;
+        if (file.Length == 0)
             return null;
-        string save = Path.Combine(o.CacheDirectory, "saves", Path.GetFileName(System.Text.RegularExpressions.Regex.Unescape(name.Groups[1].Value)));
+        string save = Path.Combine(o.CacheDirectory, "saves", file);
         if (File.Exists(save))
-            return save;
+            return (save, name.Length > 0 ? name : file);
         Console.WriteLine("The map on disk was rendered by another version; load or refresh the save game to get everything this version shows.");
         return null;
     }
@@ -418,12 +424,18 @@ internal static class Program
     }
 
     /// <param name="progress">Told what is being done and how far along the whole render is, in percent.</param>
-    private static void Render(Options o, string savePath, FactorioInstallation? installed, GameData game, Action<string, int>? progress = null)
+    /// <param name="saveName">The save's own file name, shown on the map; by default the file's.</param>
+    private static void Render(Options o, string savePath, FactorioInstallation? installed, GameData game, Action<string, int>? progress = null,
+        string? saveName = null)
     {
         progress?.Invoke("Reading the save game", 2);
         Console.WriteLine($"Loading {savePath}");
         var header = SaveHeader.Read(savePath);
         Console.WriteLine($"  \"{header.Name}\", saved by Factorio {header.GameVersionText}; mods: {string.Join(", ", header.Mods.Select(m => $"{m.Name} {m.Version}"))}");
+        header.EnsureReadable();
+        if (header.Untested)
+            Console.WriteLine($"  Factorio {header.GameVersionText} is newer than this renderer was tested with ({SaveHeader.TestedUpTo.ToString(3)}): " +
+                "it most likely works; the map says that it is untested.");
 
         var factorio = RunnableGame(o, installed, header, progress);
         string binary = factorio.PrepareBinary(o.CacheDirectory);
@@ -434,7 +446,7 @@ internal static class Program
         Console.WriteLine($"  Factorio read the map in {sw.Elapsed.TotalSeconds:0.0}s");
 
         progress?.Invoke("Finding buildings and resources", 52);
-        var export = MapExport.Read(exported, header, Path.GetFileName(savePath), File.GetLastWriteTimeUtc(savePath));
+        var export = MapExport.Read(exported, header, saveName ?? Path.GetFileName(savePath), File.GetLastWriteTimeUtc(savePath));
         var surfaces = export.Surfaces.Select(s => SurfaceMap.Build(s, export, game)).OfType<SurfaceMap>()
             .OrderBy(s => s.SortKey).ThenBy(s => s.Title, StringComparer.OrdinalIgnoreCase).ToList();
         try
@@ -467,6 +479,8 @@ internal static class Program
         progress?.Invoke("Writing the page", 98);
         HtmlExporter.Export(export, surfaces, tiles, o.Output!, o.MaxZoom, game);
         File.WriteAllText(Path.Combine(o.Output!, RenderedStamp), HtmlExporter.Version);
+        // which file the map came from, to render it again after an update: a fetched save's snapshot
+        File.WriteAllText(Path.Combine(o.Output!, SourceStamp), Path.GetFileName(savePath));
     }
 
     private static string FindSaveInCurrentDirectory()

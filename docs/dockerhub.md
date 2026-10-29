@@ -57,6 +57,9 @@ For a save newer than that, a newer headless server is downloaded from factorio.
 off with `FMR_DOWNLOAD_HEADLESS=false`). Mods from the mod portal go into `map-data/mods/` as zip files. The
 headless server in the image is x86-64 only; on ARM machines, mount a Factorio for ARM at `/game`.
 
+Reads saves from Factorio 1.0 on; tested up to 2.1.24. Saves of newer versions most likely work and are marked as
+untested on the map.
+
 ## Settings
 
 | Variable | Default | Meaning |

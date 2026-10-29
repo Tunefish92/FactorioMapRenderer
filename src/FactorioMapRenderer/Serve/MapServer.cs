@@ -16,15 +16,15 @@ namespace FactorioMapRenderer.Serve;
 /// same output directory.
 /// </summary>
 /// <param name="render">
-/// Renders the save at the given path into <paramref name="outputDirectory"/> and reports what it is doing
-/// (stage, percent of the rendering done).
+/// Renders the save at the given path into <paramref name="outputDirectory"/> under the save's own file name (a
+/// fetched save lies in a snapshot file of its own) and reports what it is doing (stage, percent of the rendering done).
 /// </param>
 /// <param name="bindAddress">"localhost" (default), "*" for every interface, or one address of this machine.</param>
 /// <param name="adminPassword">
 /// Needed to see and use the save source panel. Without one everybody who reaches the page is an admin,
 /// which is only allowed while the server listens on localhost.
 /// </param>
-public sealed class MapServer(string outputDirectory, string stateDirectory, int port, Action<string, Action<string, int>> render, Action<string> log,
+public sealed class MapServer(string outputDirectory, string stateDirectory, int port, Action<string, string, Action<string, int>> render, Action<string> log,
     string bindAddress = MapServer.Localhost, string? adminPassword = null)
 {
     public const string Localhost = "localhost";
@@ -550,7 +550,7 @@ public sealed class MapServer(string outputDirectory, string stateDirectory, int
             Directory.CreateDirectory(SavesDirectory);
             Report("Starting", 0);
             SaveSource source;
-            string saveFile;
+            string saveFile, saveName;
             switch (path)
             {
                 case "/api/upload":
@@ -568,6 +568,7 @@ public sealed class MapServer(string outputDirectory, string stateDirectory, int
                     if (long.TryParse(request.QueryString["modified"], out long modified) && modified > 0)
                         File.SetLastWriteTimeUtc(saveFile, DateTime.UnixEpoch.AddMilliseconds(modified));
                     source = Keep(new SaveSource { Kind = SaveSource.File, Name = name });
+                    saveName = name;
                     break;
                 }
                 case "/api/folder":
@@ -575,7 +576,7 @@ public sealed class MapServer(string outputDirectory, string stateDirectory, int
                     var body = await JsonSerializer.DeserializeAsync<FolderRequest>(request.InputStream, Json, cancel) ?? throw new SaveSourceException("Missing folder.");
                     source = FromRequest(body);
                     Remember(source);
-                    (saveFile, source.Name) = await FetchAsync(source, cancel);
+                    (saveFile, source.Name, saveName) = await FetchAsync(source, cancel);
                     break;
                 }
                 case "/api/ssh":
@@ -583,22 +584,22 @@ public sealed class MapServer(string outputDirectory, string stateDirectory, int
                     var body = await JsonSerializer.DeserializeAsync<SshRequest>(request.InputStream, Json, cancel) ?? throw new SaveSourceException("Missing SSH settings.");
                     source = FromRequest(body);
                     Remember(source);
-                    (saveFile, source.Name) = await FetchAsync(source, cancel);
+                    (saveFile, source.Name, saveName) = await FetchAsync(source, cancel);
                     break;
                 }
                 case "/api/refresh":
                     if (_source.Kind is not (SaveSource.Folder or SaveSource.Ssh))
                         throw new SaveSourceException("Only a save from a folder or over SSH can be refreshed.");
                     source = Keep(new SaveSource { Kind = _source.Kind });
-                    (saveFile, source.Name) = await FetchAsync(source, cancel);
+                    (saveFile, source.Name, saveName) = await FetchAsync(source, cancel);
                     break;
                 default:
                     await WriteJsonAsync(response, 404, new { error = "Unknown function." });
                     return;
             }
 
-            job.Title = Path.GetFileName(saveFile);
-            await Task.Run(() => render(saveFile, (stage, percent) => Report(stage, FetchShare + percent * (100 - FetchShare) / 100)), cancel);
+            job.Title = saveName;
+            await Task.Run(() => render(saveFile, saveName, (stage, percent) => Report(stage, FetchShare + percent * (100 - FetchShare) / 100)), cancel);
             Report("Done", 100);
             job.Finish();
             source.LoadedAt = DateTime.UtcNow;
@@ -730,11 +731,12 @@ public sealed class MapServer(string outputDirectory, string stateDirectory, int
         return next;
     }
 
-    private async Task<(string File, string Name)> FetchAsync(SaveSource source, CancellationToken cancel)
+    /// <returns>The snapshot; what the admin's panel calls it (over SSH with the host); the save's file name, for everybody.</returns>
+    private async Task<(string File, string Name, string FileName)> FetchAsync(SaveSource source, CancellationToken cancel)
     {
         string file = Path.Combine(SavesDirectory, source.Kind == SaveSource.Ssh ? "ssh-snapshot.zip" : "folder-snapshot.zip");
         string name = await SaveFetcher.FetchAsync(source, file, log, Report, cancel);
-        return (file, source.Kind == SaveSource.Ssh ? $"{name} from {source.SshTarget}" : name);
+        return (file, source.Kind == SaveSource.Ssh ? $"{name} from {source.SshTarget}" : name, name);
     }
 
     private static async Task WriteJsonAsync(HttpListenerResponse response, int status, object body)

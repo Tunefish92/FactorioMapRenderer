@@ -250,11 +250,20 @@ local function export_surface(surface, force, file_index)
   end
 
   local platform = surface.platform ~= nil
+  -- Platforms are never charted, and neither is a new map nobody has joined yet (a server's): of these, what is
+  -- generated, so that its ground shows rather than nothing.
+  local whole = platform
+  if not whole then
+    whole = true
+    for chunk in surface.get_chunks() do
+      if force.is_chunk_charted(surface, { chunk.x, chunk.y }) then whole = false; break end
+    end
+  end
   local chunks = 0
   for chunk in surface.get_chunks() do
     local cx, cy = chunk.x, chunk.y
     local charted = force.is_chunk_charted(surface, { cx, cy })
-    if not charted and platform then charted = surface.is_chunk_generated({ cx, cy }) end
+    if not charted and whole then charted = surface.is_chunk_generated({ cx, cy }) end
     if charted then
       chunks = chunks + 1
       local x0, y0 = cx * 32, cy * 32

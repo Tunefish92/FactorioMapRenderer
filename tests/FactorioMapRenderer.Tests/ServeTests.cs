@@ -137,7 +137,7 @@ public sealed class StaticFileTests
             Directory.CreateDirectory(Path.Combine(root, "map", "surfaces"));
             File.WriteAllText(Path.Combine(root, "map", "surfaces", "1.js"), text);
             File.WriteAllText(Path.Combine(root, "map", "index.html"), "<title>map</title>");
-            var server = new MapServer(Path.Combine(root, "map"), Path.Combine(root, "state"), port, (_, _) => { }, _ => { });
+            var server = new MapServer(Path.Combine(root, "map"), Path.Combine(root, "state"), port, (_, _, _) => { }, _ => { });
             var running = server.RunAsync(stop.Token);
 
             using var http = new HttpClient(new HttpClientHandler { AutomaticDecompression = DecompressionMethods.None });

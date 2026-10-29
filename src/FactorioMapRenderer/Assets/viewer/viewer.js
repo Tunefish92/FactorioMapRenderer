@@ -55,6 +55,13 @@
       time.textContent = 'Saved ' + saved.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
       time.title = saved.toISOString().replace('T', ' ').replace(/:\d\d\.000Z$/, ' UTC');
     }
+    // saved by a Factorio newer than the renderer was tried with
+    if (D.testedUpTo) {
+      const untested = document.getElementById('status-untested');
+      untested.hidden = false;
+      untested.title = `Saved by Factorio ${D.gameVersion}; this version of the map renderer was tested up to ${D.testedUpTo}. `
+        + 'The map most likely is right, but some things may be missing.';
+    }
     document.getElementById('statusbar').hidden = false;
   }
 
@@ -136,9 +143,12 @@
   // Surfaces zoom in half steps, so that their tiles are drawn at or close to their own size. The star map has no
   // tiles: there the zoom glides without steps. Each turn of the wheel or move on the touchpad moves where the zoom
   // is heading, and the map follows it frame by frame, around the point under the pointer.
+  // A drag swings on when let go, but only so far: without a limit a quick flick throws the map off the screen,
+  // and on the star map all its few planets at once. At most inertiaMaxSpeed² / (2 · inertiaDeceleration ·
+  // easeLinearity) pixels (Leaflet's easeLinearity is 0.2): about 300 on a surface, 100 on the star map.
   const ZOOM_FEEL = {
-    surface: { zoomSnap: 0.5, zoomDelta: 0.5 },
-    space: { zoomSnap: 0, zoomDelta: 0.25 },
+    surface: { zoomSnap: 0.5, zoomDelta: 0.5, inertiaMaxSpeed: 600, inertiaDeceleration: 3000 },
+    space: { zoomSnap: 0, zoomDelta: 0.25, inertiaMaxSpeed: 400, inertiaDeceleration: 4000 },
   };
   const WHEEL_PX_PER_ZOOM = 300, GLIDE_MS = 110;
   let glide = null; // { target, point, last, frame }
@@ -152,11 +162,20 @@
     glide.last = now;
     const next = Math.abs(glide.target - z) < 0.002 ? glide.target : z + (glide.target - z) * k;
     map.setZoomAround(glide.point, next, { animate: false });
-    if (next === glide.target) glide = null; else glide.frame = requestAnimationFrame(glideStep);
+    if (next !== glide.target) { glide.frame = requestAnimationFrame(glideStep); return; }
+    glide = null;
+    if (map.options.maxBounds) map.panInsideBounds(map.options.maxBounds, { animate: false }); // where the star map ends
   }
+  // A drag and a glide must not move the map at the same time: each frame of the glide sets the view anew, and
+  // the drag would add its whole way again every time, sending the planets off the screen. A drag ends the glide;
+  // the wheel waits for the drag; a glide first stops what is left of a drag's swing.
+  const stopGlide = () => { if (glide) { cancelAnimationFrame(glide.frame); glide = null; } };
+  map.on('dragstart', stopGlide);
   map.getContainer().addEventListener('wheel', e => {
     if (current?.surface.kind !== 'space') return;
     e.preventDefault();
+    if (map.dragging._draggable?._moving) return;
+    if (!glide) map.stop();
     const point = map.mouseEventToContainerPoint(e);
     const target = Math.min(map.getMaxZoom(), Math.max(map.getMinZoom(), (glide ? glide.target : map.getZoom()) + L.DomEvent.getWheelDelta(e) * (e.ctrlKey ? 4 : 1) / WHEEL_PX_PER_ZOOM)); // a pinch: small steps
     if (glide) Object.assign(glide, { target, point });
@@ -340,14 +359,68 @@
     };
   })();
 
+  // Tiles drawn lately, as pictures, for when the map comes back to them (another zoom, a pan back, the
+  // surface again): shown at once instead of drawn anew. Up to about 64 MB, the oldest go first.
+  const drawnTiles = new Map();
+  let drawnBytes = 0;
+  const DRAWN_BYTES = 64e6;
+  function keepDrawn(key, bitmap) {
+    drawnTiles.set(key, bitmap);
+    drawnBytes += bitmap.width * bitmap.height * 4;
+    for (const [old, b] of drawnTiles) {
+      if (drawnBytes <= DRAWN_BYTES) break;
+      drawnTiles.delete(old);
+      drawnBytes -= b.width * b.height * 4;
+      b.close();
+    }
+  }
+
+  /**
+   * A tile from the workers, or from the tiles drawn lately; ready() when it is there. The picture is handed to
+   * the tile without copying it; the copy that is kept for later is made by the browser, away from the page.
+   */
+  function workerTile(tile, key, job, ready, surface = null, closeUp = null) {
+    const show = bitmap => {
+      tile.getContext('bitmaprenderer').transferFromImageBitmap(bitmap);
+      ready();
+    };
+    const kept = drawnTiles.get(key);
+    if (kept) {
+      drawnTiles.delete(key); // the newest again
+      drawnTiles.set(key, kept);
+      createImageBitmap(kept).then(show, ready);
+      return;
+    }
+    tile.drawing = drawPool.draw({ ...job, width: tile.width, height: tile.height }, surface, closeUp);
+    tile.drawing.promise.then(bitmap => {
+      tile.drawing = null;
+      createImageBitmap(bitmap).then(copy => keepDrawn(key, copy), () => {}).finally(() => show(bitmap));
+    }, ready);
+  }
+
+  /**
+   * What the tile layers drawn by the workers share: a tile that leaves the view before it is drawn is not drawn,
+   * and a ring of tiles around the view is drawn too, so that a pan finds them done (nearest first, as always).
+   */
+  const DrawnTiles = {
+    _drawnInit() {
+      if (drawPool) this.on('tileunload', e => e.tile.drawing && drawPool.cancel(e.tile.drawing));
+    },
+    _getTiledPixelBounds(center) {
+      const bounds = L.GridLayer.prototype._getTiledPixelBounds.call(this, center), pad = this.getTileSize().x;
+      return new L.Bounds(bounds.min.subtract([pad, pad]), bounds.max.add([pad, pad]));
+    },
+  };
+
   const CloseUp = L.GridLayer.extend({
+    ...DrawnTiles,
     initialize(surface, closeUp, kind, options) {
       L.GridLayer.prototype.initialize.call(this, options);
       this.surface = surface;
       this.closeUp = closeUp;
       this.kind = kind;
       closeUp.regionSet ??= new Set(closeUp.regions ? closeUp.regions.split(' ') : []);
-      if (drawPool) this.on('tileunload', e => e.tile.drawing && drawPool.cancel(e.tile.drawing));
+      this._drawnInit();
     },
     createTile(coords, done) {
       const size = this.getTileSize(), ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -357,14 +430,8 @@
       const perTile = 2 ** coords.z * f, span = size.x / perTile;
       const job = { kind: this.kind, x0: coords.x * span, y0: coords.y * span, span, perTile, ratio };
       const ready = () => done(null, tile);
-      if (drawPool) {
-        tile.drawing = drawPool.draw({ ...job, width: tile.width, height: tile.height }, this.surface, this.closeUp);
-        tile.drawing.promise.then(bitmap => {
-          tile.drawing = null;
-          tile.getContext('bitmaprenderer').transferFromImageBitmap(bitmap);
-          ready();
-        }, ready);
-      } else {
+      if (drawPool) workerTile(tile, `${this.kind}|${this.surface.id}|${coords.z}|${coords.x}|${coords.y}|${ratio}`, job, ready, this.surface, this.closeUp);
+      else {
         window.FMR_CLOSEUP.draw(tile, { ...job, closeUp: this.closeUp }, key => loadRegion(this.surface.id, this.closeUp, key),
           loadImage, i => iconImages[i]).then(ready, ready);
       }
@@ -390,6 +457,7 @@
 
   /** The game's alt mode: over each building what it makes, mines or lets through; drawn as the close-up tiles are. */
   const AltMode = L.GridLayer.extend({
+    ...DrawnTiles,
     initialize(entries, options) {
       L.GridLayer.prototype.initialize.call(this, options);
       this.cells = new Map(); // 32 × 32 tiles → entries [x, y, size, [icon…], [module icon…]]
@@ -398,7 +466,7 @@
         if (!this.cells.has(key)) this.cells.set(key, []);
         this.cells.get(key).push(entry);
       }
-      if (drawPool) this.on('tileunload', e => e.tile.drawing && drawPool.cancel(e.tile.drawing));
+      this._drawnInit();
     },
     createTile(coords, done) {
       const size = this.getTileSize(), ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -413,14 +481,8 @@
       const ready = () => done(null, tile);
       if (!entries.length) { setTimeout(ready, 0); return tile; }
       const job = { kind: 'alt', entries, x0, y0, span, perTile, ratio };
-      if (drawPool) {
-        tile.drawing = drawPool.draw({ ...job, width: tile.width, height: tile.height });
-        tile.drawing.promise.then(bitmap => {
-          tile.drawing = null;
-          tile.getContext('bitmaprenderer').transferFromImageBitmap(bitmap);
-          ready();
-        }, ready);
-      } else {
+      if (drawPool) workerTile(tile, `alt|${this.options.surface}|${coords.z}|${coords.x}|${coords.y}|${ratio}`, job, ready);
+      else {
         window.FMR_CLOSEUP.drawAlt(tile, job, i => iconImages[i]).then(ready, ready);
       }
       return tile;
@@ -524,13 +586,17 @@
       const layer = layerDefs.find(l => l.title === item[4]) || layerDefs.find(l => l.id === 'buildings');
       searchIndex.push({ name: plain(item[3]), layer, lat: y, lng: x, open: () => { ensureVisible(layer.id); showInspect(item); } });
     });
-    const alt = new AltMode(data.alt || [], { zIndex: 60, maxZoom: MAX_ZOOM, noWrap: true, className: 'alt-mode' });
+    const alt = new AltMode(data.alt || [], { zIndex: 60, maxZoom: MAX_ZOOM, noWrap: true, className: 'alt-mode', surface: surface.id });
     return { handles, searchIndex, inspectGrid, alt };
   }
 
+  // the surface chosen last is shown, even if one chosen before it takes longer to load
+  let showing = 0;
   async function showSurface(surface, view) {
+    const ticket = ++showing;
     if (surface.kind === 'space') return showSpace(view);
     const data = await loadSurface(surface.id);
+    if (ticket !== showing) return;
     if (current) for (const h of Object.values(current.handles)) map.removeLayer(h.leaflet);
     map.closePopup();
     document.body.classList.remove('space-view');
@@ -542,6 +608,18 @@
     const { handles, searchIndex, inspectGrid } = built;
     if (current?.alt) map.removeLayer(current.alt);
 
+    // To the new place first, then the layers: added before, they would load tiles of the old place and zoom.
+    // Meanwhile no surface is current, so that what the move sets off leaves the old one's layers alone.
+    current = null;
+    const [x1, y1, x2, y2] = surface.bounds, margin = Math.max(x2 - x1, y2 - y1) * 0.3 + 64;
+    map.setMaxBounds(L.latLngBounds([y1 - margin, x1 - margin], [y2 + margin, x2 + margin]));
+    map.setMinZoom(surface.minZoom - 2);
+    if (view) map.setView([view.y, view.x], view.zoom, { animate: false });
+    else {
+      const b = surface.focus || surface.bounds;
+      map.fitBounds(L.latLngBounds([b[1], b[0]], [b[3], b[2]]).pad(0.05), { animate: false });
+    }
+
     current = { surface, data, handles, searchIndex, inspectGrid, alt: built.alt };
     applyAlt();
     store.set('surface', surface.name);
@@ -549,15 +627,6 @@
     renderStatistics();
     markSurface();
     search.dispatchEvent(new Event('input'));
-
-    if (view) map.setView([view.y, view.x], view.zoom);
-    else {
-      const b = surface.focus || surface.bounds;
-      map.fitBounds(L.latLngBounds([b[1], b[0]], [b[3], b[2]]).pad(0.05));
-    }
-    const [x1, y1, x2, y2] = surface.bounds, margin = Math.max(x2 - x1, y2 - y1) * 0.3 + 64;
-    map.setMaxBounds(L.latLngBounds([y1 - margin, x1 - margin], [y2 + margin, x2 + margin]));
-    map.setMinZoom(surface.minZoom - 2);
     applyCloseUp();
   }
 
@@ -594,12 +663,9 @@
     return [-location.distance * Math.cos(angle) * SPACE_SCALE, location.distance * Math.sin(angle) * SPACE_SCALE]; // [y, x]
   };
 
-  function showSpace(view) {
-    if (current) for (const h of Object.values(current.handles)) map.removeLayer(h.leaflet);
-    if (current?.alt) map.removeLayer(current.alt);
-    map.closePopup();
-    document.body.classList.add('space-view');
-    setZoomFeel('space');
+  /** The star map's layers and what can be searched in it. */
+  let spaceBuilt = null;
+  function buildSpace() {
     const space = D.space, group = L.layerGroup(), searchIndex = [];
     const places = new Map(space.locations.map(l => [l.name, l]));
     const spaceLayer = { title: 'Solar system', color: '#f0a03c' };
@@ -688,7 +754,18 @@
       marker.on('click', open);
       searchIndex.push({ name: plain(p.title), layer: spaceLayer, lat: position[0], lng: position[1], open });
     }
+    return { group, searchIndex, extent };
+  }
 
+  function showSpace(view) {
+    if (current) for (const h of Object.values(current.handles)) map.removeLayer(h.leaflet);
+    if (current?.alt) map.removeLayer(current.alt);
+    map.closePopup();
+    document.body.classList.add('space-view');
+    setZoomFeel('space');
+    // built once: the star map does not change while the page is open
+    spaceBuilt ??= buildSpace();
+    const { group, searchIndex, extent } = spaceBuilt, space = D.space;
     group.addTo(map);
     current = { surface: SPACE, data: { counts: [], production: [], inspect: [] }, handles: { space: { leaflet: group } }, searchIndex, inspectGrid: new Map() };
     store.set('surface', 'space');
@@ -782,17 +859,37 @@
   const DRAWN_CLOSE_UP = ['resources', 'nature', 'enemies', 'buildings', 'belts', 'pipes', 'rails', 'power'];
   const shown = id => visibility[id] ?? layerDefs.find(l => l.id === id)?.visible;
   /** @param zoom the zoom the map is at, or heading for when a zoom begins */
+  let handover = 0;
   function applyCloseUp(zoom = map.getZoom()) {
     if (!current) return;
     const graphics = current.handles.graphics;
     const closeUp = !!current.data.closeUp && !!graphics && map.hasLayer(graphics.leaflet) && zoom >= current.data.closeUp.minZoom;
-    for (const id of DRAWN_CLOSE_UP) {
-      const h = current.handles[id];
-      if (!h) continue;
-      if (shown(id) && !closeUp) { if (!map.hasLayer(h.leaflet)) h.leaflet.addTo(map); }
-      // a layer added before the map has its first view is only set up then: it can only be taken off after that
-      else if (map.hasLayer(h.leaflet)) { if (h.leaflet._map) map.removeLayer(h.leaflet); else h.leaflet.once('add', () => applyCloseUp()); }
+    const ticket = ++handover, surface = current;
+    const giveWay = () => {
+      if (ticket !== handover || current !== surface) return; // the map has moved on since
+      for (const id of DRAWN_CLOSE_UP) {
+        const h = current.handles[id];
+        if (!h || !map.hasLayer(h.leaflet)) continue;
+        // a layer added before the map has its first view is only set up then: it can only be taken off after that
+        if (h.leaflet._map) map.removeLayer(h.leaflet); else h.leaflet.once('add', () => applyCloseUp());
+      }
+    };
+    if (!closeUp) {
+      for (const id of DRAWN_CLOSE_UP) {
+        const h = current.handles[id];
+        if (h && shown(id) && !map.hasLayer(h.leaflet)) h.leaflet.addTo(map);
+        else if (h && !shown(id) && map.hasLayer(h.leaflet)) map.removeLayer(h.leaflet);
+      }
+      return;
     }
+    // Coming close: the map view stays until the game's graphics are drawn over it, so there is no empty moment
+    // while they come (at most a few seconds). Already close up, the flat layers are gone and nothing waits.
+    if (!DRAWN_CLOSE_UP.some(id => current.handles[id] && map.hasLayer(current.handles[id].leaflet))) return;
+    const drawn = ['ground', 'graphics'].map(id => current.handles[id]?.leaflet).filter(l => l && map.hasLayer(l));
+    Promise.race([
+      Promise.all(drawn.map(l => new Promise(resolve => l.once('load', resolve)))),
+      new Promise(resolve => setTimeout(resolve, 4000)),
+    ]).then(giveWay);
   }
   map.on('zoomanim', e => applyCloseUp(e.zoom)); // before the layers load tiles for a zoom they give way at
   map.on('zoomend', () => applyCloseUp());

@@ -19,6 +19,23 @@ public sealed class SaveHeaderTests
     }
 
     [Fact]
+    public void Saves_from_1_0_on_are_read_newer_ones_than_tested_are_marked()
+    {
+        SaveHeader Save(int major, int minor, int build) => new("world", new Version(major, minor, build, 0), "freeplay", []);
+
+        // Factorio 2 refuses saves before 1.0; the renderer says so before starting the game
+        var old = Assert.Throws<SaveFormatException>(() => Save(0, 18, 47).EnsureReadable());
+        Assert.Contains("Factorio 0.18.47", old.Message);
+        Save(1, 0, 0).EnsureReadable();
+        Save(1, 1, 110).EnsureReadable();
+
+        Assert.False(Save(1, 1, 110).Untested);
+        Assert.False(Save(SaveHeader.TestedUpTo.Major, SaveHeader.TestedUpTo.Minor, SaveHeader.TestedUpTo.Build).Untested);
+        Assert.True(Save(SaveHeader.TestedUpTo.Major, SaveHeader.TestedUpTo.Minor, SaveHeader.TestedUpTo.Build + 1).Untested);
+        Assert.True(Save(3, 0, 0).Untested);
+    }
+
+    [Fact]
     public void Reads_a_zipped_save_with_compressed_level_data()
     {
         string file = Path.Combine(Path.GetTempPath(), $"fmr-{Guid.NewGuid():N}.zip");

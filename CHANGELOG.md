@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.1 – 2026-10-29
+
+* Supported versions made explicit: saves from Factorio 1.0 up to 2.1.24 (tested). A save of a newer version is
+  shown as untested (a badge in the status bar, a note in the details); one older than 1.0 is refused at once with
+  what to do about it.
+* A new map nobody has joined yet (on a server) shows its generated starting area instead of nothing, and the map
+  seed is always in the details.
+* A save from a folder or over SSH is shown under its own name, not as the snapshot the renderer copied it to.
+* Star map: zooming and dragging at the same time no longer sends the planets off the screen, and a quick flick
+  no longer throws the map away (on every surface the swing after a drag is limited).
+* Smoother tiles everywhere: switching to a surface no longer loads tiles of the place left behind; zooming into the
+  game's graphics keeps the map until they are drawn; a ring of tiles around the view is drawn ahead, and tiles drawn
+  lately come back at once; the star map is built once.
+
 ## 0.1.0 – 2026-10-29
 
 * An interactive map of a Factorio save in the browser: every planet and space platform as far as it is

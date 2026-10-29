@@ -256,13 +256,27 @@ and forwards `Host` and `X-Forwarded-Proto`; otherwise the admin password travel
 project's GitHub releases, at most every six hours, and shows a banner when a newer version is out. It is off by
 default; the check is a request from the admin's browser to `api.github.com`, and visitors never make it.
 
+## Supported versions
+
+| Saved by | |
+|---|---|
+| Factorio 2.0 and 2.1, up to **2.1.24** | Tested. Space Age, Quality and Elevated Rails included. |
+| Factorio 1.0 and 1.1 | Read: Factorio brings the save up to date as it loads it, as when you open it in the game. |
+| Newer than 2.1.24 | Most likely works. The map says it is untested: a badge in the status bar and a note in the save's details. |
+| Older than 1.0 (0.18, 0.17, …) | Not readable: Factorio 2 loads saves from 1.0 on. Open the save in Factorio 1.1 and save it again. |
+
+The game itself reads the save: the renderer uses a game at least as new as the save, and fetches Factorio's free
+headless server of the save's version when it has none (`FMR_DOWNLOAD_HEADLESS`). Any map seed, any map
+generation settings and every preset work, since the map shows what the game generated; the seed is listed under
+the save's details.
+
 ## Limitations
 
-* The map shows what the player force has charted, like the game's map. Space platforms are shown whole.
-* The game graphics show frame 0 of each animation, without shadows, lights and smoke. Rails, trains, vehicles
-  and cliffs keep their map style there: the game builds those from many pieces or turns them freely. Logistic
-  chests have no sprite in the game's data and show their icon. Transitions between different grounds are hard
-  edges.
+* The map shows what the player force has charted, like the game's map. Space platforms are shown whole, and so
+  is a new map that nobody has joined yet (a server's): its generated starting area.
+* The game graphics show frame 0 of each animation, without shadows, lights and smoke. Trains and vehicles turn
+  freely and keep their footprint with their icon, rail ramps too; signals show their post without the rail piece
+  under it. Transitions between different grounds are hard edges.
 * Rendering needs a Factorio that can load the save: one at least as new as the save, with the save's mods.
 * A Factorio server offers no live feed. "Live" means saving, fetching and rendering a new snapshot, about two
   minutes for a large factory at the default zoom.

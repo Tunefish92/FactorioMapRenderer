@@ -20,7 +20,29 @@ public sealed record SaveMod(string Name, string Version);
 /// </remarks>
 public sealed record SaveHeader(string Name, Version GameVersion, string Scenario, IReadOnlyList<SaveMod> Mods)
 {
+    /// <summary>
+    /// The oldest save the game reads: Factorio 2 loads saves from 1.0 on ("minimum input version 1.0.0"); saves of
+    /// 1.0 and 1.1 are brought up to date as the game loads them.
+    /// </summary>
+    public static readonly Version Oldest = new(1, 0, 0);
+
+    /// <summary>The newest Factorio this version of the renderer was tried with; saves of newer ones are untested.</summary>
+    public static readonly Version TestedUpTo = new(2, 1, 24);
+
     public string GameVersionText => $"{GameVersion.Major}.{GameVersion.Minor}.{GameVersion.Build}";
+
+    private Version Release => new(GameVersion.Major, GameVersion.Minor, GameVersion.Build);
+
+    /// <summary>Saved by a Factorio newer than the renderer was tried with: it most likely works, but nobody knows.</summary>
+    public bool Untested => Release > TestedUpTo;
+
+    /// <summary>Stops with a message for a save that no game this renderer can run reads any more.</summary>
+    public void EnsureReadable()
+    {
+        if (Release < Oldest)
+            throw new SaveFormatException($"This save is from Factorio {GameVersionText}. Factorio reads saves from {Oldest.ToString(3)} on: " +
+                "load it in Factorio 1.1 and save it again, then it can be shown.");
+    }
 
     public static SaveHeader Read(string zipPath)
     {

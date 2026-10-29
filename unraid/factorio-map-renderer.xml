@@ -13,7 +13,7 @@
 &#xD;
 The save game is chosen in the web UI by an admin: upload a save .zip, take the newest save from a folder (e.g. your Factorio server's saves, mounted at /saves) or copy it over SSH. With the server's RCON the running game is saved first, and a Server tab shows the server's state. A "Refresh snapshot" button fetches the current state again. Visitors only see the map.&#xD;
 &#xD;
-The game reads the save: Factorio's free headless server comes with the image. Icons, names, sprites, ground textures and the star map (Factorio 2.1.23 with Space Age) are included; the page loads nothing from other sites.</Overview>
+The game reads the save: Factorio's free headless server comes with the image. Icons, names, sprites, ground textures and the star map (Factorio 2.1.23 with Space Age) are included; the page loads nothing from other sites. Reads saves from Factorio 1.0 on, tested up to 2.1.24.</Overview>
   <Category>GameServers: Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/Tunefish92/unraid-templates/main/templates/factorio-map-renderer.xml</TemplateURL>

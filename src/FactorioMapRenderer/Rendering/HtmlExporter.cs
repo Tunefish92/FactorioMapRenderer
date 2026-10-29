@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FactorioMapRenderer.Game;
+using FactorioMapRenderer.Save;
 using FactorioMapRenderer.World;
 
 namespace FactorioMapRenderer.Rendering;
@@ -144,6 +145,8 @@ public static partial class HtmlExporter
         // them for good and a new render, which reuses the names, still reaches it.
         w.WriteString("build", Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(6)));
         w.WriteString("gameVersion", export.Header.GameVersionText);
+        if (export.Header.Untested)
+            w.WriteString("testedUpTo", SaveHeader.TestedUpTo.ToString(3));
         w.WriteNumber("maxZoom", maxZoom);
         w.WriteNumber("pixelsPerTileAtZoom0", TileRenderer.PixelsPerTileAtZoom0);
         if (logo is not null)
@@ -307,7 +310,9 @@ public static partial class HtmlExporter
     private static IEnumerable<(string, string)> Summary(MapExport export, IReadOnlyList<SurfaceMap> surfaces, GameData game)
     {
         yield return ("Save", export.Header.Name);
-        yield return ("Saved by Factorio", export.Header.GameVersionText);
+        yield return ("Saved by Factorio", export.Header.Untested
+            ? $"{export.Header.GameVersionText} (untested: newer than {SaveHeader.TestedUpTo.ToString(3)})"
+            : export.Header.GameVersionText);
         yield return ("Scenario", GameData.Readable(export.Header.Scenario));
         if (export.TicksPlayed > 0)
             yield return ("Play time", SurfaceMap.Duration(export.TicksPlayed));
@@ -331,7 +336,8 @@ public static partial class HtmlExporter
             platforms > 0 ? $"{platforms} space platform{(platforms == 1 ? "" : "s")}" : null,
             surfaces.Count - planets - platforms is var other and > 0 ? $"{other} other" : null,
         }.OfType<string>()));
-        if (surfaces.FirstOrDefault(s => s.Data.Planet == "nauvis")?.Data.Seed is { } seed)
+        // from the save itself: also when nothing of Nauvis is on the map
+        if ((export.Surfaces.FirstOrDefault(s => s.Planet == "nauvis") ?? export.Surfaces.FirstOrDefault())?.Seed is { } seed)
             yield return ("Map seed", seed.ToString(CultureInfo.InvariantCulture));
     }
 

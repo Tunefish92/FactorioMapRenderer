@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 – 2026-10-31
+
+* Smoother zooming: the map no longer makes the browser lay out the page again for every tile layer and every label
+  at each step of a zoom, the game graphics and the alt mode come in larger tiles (a quarter as many pieces for the
+  browser to put together at every frame), and the alt mode and chunk grid are only drawn for the zoom a zoom ends at.
+* The tick box that shows or hides all layers of a group is no longer inside the group's folding header (invalid
+  HTML that browsers warned about, and out of reach of screen readers); it looks and works as before.
+
 ## 0.1.2 – 2026-10-31
 
 * Folder and SSH: a save Factorio is still writing (`name.tmp.zip`), or one left over from a save that was cut off,

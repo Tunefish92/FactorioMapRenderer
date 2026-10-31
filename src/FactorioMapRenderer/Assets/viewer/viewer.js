@@ -240,6 +240,102 @@
     return `${icon}<h3>${rich(name)}</h3><div class="sub">${esc(subtitle)}<br>x ${coord(x)} · y ${coord(y)}</div>${rows ? `<table>${rows}</table>` : ''}`;
   }
 
+  /*
+   * Leaflet's _updateLevels (1.9.4) without the layout it forces for every new zoom level, so that the browser takes
+   * the level's first scale before the zoom animation's: with a dozen tile layers that is a dozen layouts per zoom
+   * step, most of what a zoom costs the page. A level made during the animation has nothing to show yet; it stays
+   * hidden until the zoom has ended instead, so it never shows at the wrong scale.
+   */
+  L.GridLayer.include({
+    _updateLevels() {
+      const zoom = this._tileZoom, maxZoom = this.options.maxZoom, map = this._map;
+      if (zoom === undefined) return undefined;
+      for (const key in this._levels) {
+        const z = Number(key);
+        if (this._levels[z].el.children.length || z === zoom) {
+          this._levels[z].el.style.zIndex = maxZoom - Math.abs(zoom - z);
+          this._onUpdateLevel(z);
+        } else {
+          L.DomUtil.remove(this._levels[z].el);
+          this._removeTilesAtZoom(z);
+          this._onRemoveLevel(z);
+          delete this._levels[z];
+        }
+      }
+      let level = this._levels[zoom];
+      if (!level) {
+        level = this._levels[zoom] = { zoom };
+        level.el = L.DomUtil.create('div', 'leaflet-tile-container leaflet-zoom-animated', this._container);
+        level.el.style.zIndex = maxZoom;
+        level.origin = map.project(map.unproject(map.getPixelOrigin()), zoom).round();
+        this._setZoomTransform(level, map.getCenter(), map.getZoom());
+        if (map._animatingZoom) {
+          level.el.style.visibility = 'hidden';
+          map.once('zoomend', () => { level.el.style.visibility = ''; });
+        }
+        this._onCreateLevel(level);
+      }
+      this._level = level;
+      return level;
+    },
+  });
+
+  /*
+   * Tiles placed with left and top instead of Leaflet's translate3d: a 3D transform makes every tile a layer of its
+   * own that the browser composites at every frame, hundreds of them with the close-up layers. Placed flat, a zoom
+   * level's tiles are one layer, which the zoom animation scales as a whole.
+   */
+  const addTile = L.GridLayer.prototype._addTile;
+  L.GridLayer.include({
+    _addTile(coords, container) {
+      addTile.call(this, coords, container);
+      const tile = this._tiles[this._tileCoordsToKey(coords)]?.el, pos = tile?._leaflet_pos;
+      if (!pos) return;
+      tile.style.transform = '';
+      tile.style.left = `${pos.x}px`;
+      tile.style.top = `${pos.y}px`;
+    },
+  });
+
+  /*
+   * Leaflet's tooltip _setPosition (1.9.4) with the label measured once instead of at every step of a zoom, where
+   * reading its size forces a layout each time. Measured anew when its text changes, and for all labels when they
+   * are shown or hidden or the font has loaded (labelsChanged).
+   */
+  let labelGeneration = 0;
+  const labelsChanged = () => { labelGeneration++; };
+  document.fonts?.addEventListener('loadingdone', labelsChanged);
+  const tooltipContent = L.Tooltip.prototype._updateContent;
+  L.Tooltip.include({
+    _updateContent() {
+      this._size = null;
+      return tooltipContent.apply(this, arguments);
+    },
+    _setPosition(pos) {
+      const map = this._map, container = this._container;
+      const centerPoint = map.latLngToContainerPoint(map.getCenter()), tooltipPoint = map.layerPointToContainerPoint(pos);
+      if (this._size?.generation !== labelGeneration) {
+        this._size = { width: container.offsetWidth, height: container.offsetHeight, generation: labelGeneration };
+      }
+      const { width, height } = this._size, offset = L.point(this.options.offset), anchor = this._getAnchor();
+      let direction = this.options.direction, subX, subY;
+      if (direction === 'top') { subX = width / 2; subY = height; }
+      else if (direction === 'bottom') { subX = width / 2; subY = 0; }
+      else {
+        if (direction === 'center') subX = width / 2;
+        else if (direction === 'right') subX = 0;
+        else if (direction === 'left') subX = width;
+        else if (tooltipPoint.x < centerPoint.x) { direction = 'right'; subX = 0; }
+        else { direction = 'left'; subX = width + (offset.x + anchor.x) * 2; }
+        subY = height / 2;
+      }
+      pos = pos.subtract(L.point(subX, subY, true)).add(offset).add(anchor);
+      for (const side of ['right', 'left', 'top', 'bottom']) L.DomUtil.removeClass(container, `leaflet-tooltip-${side}`);
+      L.DomUtil.addClass(container, `leaflet-tooltip-${direction}`);
+      L.DomUtil.setPosition(container, pos);
+    },
+  });
+
   const SparseTiles = L.GridLayer.extend({
     initialize(path, set, options) {
       L.GridLayer.prototype.initialize.call(this, options);
@@ -407,7 +503,7 @@
       if (drawPool) this.on('tileunload', e => e.tile.drawing && drawPool.cancel(e.tile.drawing));
     },
     _getTiledPixelBounds(center) {
-      const bounds = L.GridLayer.prototype._getTiledPixelBounds.call(this, center), pad = this.getTileSize().x;
+      const bounds = L.GridLayer.prototype._getTiledPixelBounds.call(this, center), pad = 256;
       return new L.Bounds(bounds.min.subtract([pad, pad]), bounds.max.add([pad, pad]));
     },
   };
@@ -453,7 +549,7 @@
       return tile;
     },
   });
-  const grid = new ChunkGrid({ zIndex: 50, maxZoom: MAX_ZOOM });
+  const grid = new ChunkGrid({ zIndex: 50, maxZoom: MAX_ZOOM, updateWhenZooming: false });
 
   /** The game's alt mode: over each building what it makes, mines or lets through; drawn as the close-up tiles are. */
   const AltMode = L.GridLayer.extend({
@@ -517,7 +613,7 @@
         if (!data.closeUp) return;
         handles[layer.id] = {
           leaflet: new CloseUp(surface, data.closeUp, layer.id, {
-            tileSize: 256, minZoom: data.closeUp.minZoom, maxZoom: MAX_ZOOM, zIndex: index + 1, noWrap: true, className: `tiles-${layer.id}`,
+            tileSize: 512, minZoom: data.closeUp.minZoom, maxZoom: MAX_ZOOM, zIndex: index + 1, noWrap: true, className: `tiles-${layer.id}`,
             updateWhenZooming: false, // drawing is dear: only for the zoom a zoom ends at
           }),
           count: -1,
@@ -586,7 +682,9 @@
       const layer = layerDefs.find(l => l.title === item[4]) || layerDefs.find(l => l.id === 'buildings');
       searchIndex.push({ name: plain(item[3]), layer, lat: y, lng: x, open: () => { ensureVisible(layer.id); showInspect(item); } });
     });
-    const alt = new AltMode(data.alt || [], { zIndex: 60, maxZoom: MAX_ZOOM, noWrap: true, className: 'alt-mode', surface: surface.id });
+    const alt = new AltMode(data.alt || [], {
+      zIndex: 60, maxZoom: MAX_ZOOM, noWrap: true, className: 'alt-mode', surface: surface.id, updateWhenZooming: false, tileSize: 512,
+    });
     return { handles, searchIndex, inspectGrid, alt };
   }
 
@@ -920,19 +1018,21 @@
       const h = current.handles[layer.id];
       if (layer.group !== currentGroup) {
         currentGroup = layer.group;
-        const group = document.createElement('details');
+        // the tick box for all of the group's layers sits on the header, but outside its <summary>: a control inside
+        // one would also fold the group, and screen readers cannot reach it there
+        const group = document.createElement('div');
         group.className = 'group';
-        group.open = !closedGroups.has(currentGroup);
-        group.innerHTML = `<summary><input type="checkbox" class="group-all" title="Show or hide all ${esc(currentGroup.toLowerCase())} layers" aria-label="Show or hide all ${esc(currentGroup)} layers">`
-          + `<span class="group-name">${esc(currentGroup)}</span><span class="group-count"></span></summary><div class="group-body"></div>`;
+        group.innerHTML = `<input type="checkbox" class="group-all" title="Show or hide all ${esc(currentGroup.toLowerCase())} layers" aria-label="Show or hide all ${esc(currentGroup)} layers">`
+          + `<details class="group-fold"><summary><span class="group-name">${esc(currentGroup)}</span><span class="group-count"></span></summary>`
+          + `<div class="group-body"></div></details>`;
         layersElement.appendChild(group);
         container = group.querySelector('.group-body');
-        const name = currentGroup;
-        group.addEventListener('toggle', () => {
-          if (group.open) closedGroups.delete(name); else closedGroups.add(name);
+        const name = currentGroup, fold = group.querySelector('.group-fold');
+        fold.open = !closedGroups.has(name);
+        fold.addEventListener('toggle', () => {
+          if (fold.open) closedGroups.delete(name); else closedGroups.add(name);
           store.set('closedGroups', [...closedGroups]);
         });
-        group.querySelector('.group-all').addEventListener('click', e => e.stopPropagation()); // do not fold the group
         group.querySelector('.group-all').addEventListener('change', e => {
           const on = e.target.checked; // read once: every setLayer below re-evaluates this very box
           for (const box of group.querySelectorAll('input[data-layer]:not(:disabled)')) setLayer(box.dataset.layer, on);
@@ -1028,10 +1128,18 @@
 
   // ---------------------------------------------------------------- options
 
+  /** Labels shown or hidden: measured and placed again (a hidden label has no size). */
+  const toggleLabels = (name, on) => {
+    if (document.body.classList.contains(name) === on) return;
+    document.body.classList.toggle(name, on);
+    labelsChanged();
+    map.eachLayer(l => { if (l instanceof L.Tooltip) l._updatePosition(); });
+  };
+
   const labels = document.getElementById('opt-labels');
   labels.checked = store.get('labels', true);
   const applyLabels = () => {
-    document.body.classList.toggle('no-labels', !labels.checked);
+    toggleLabels('no-labels', !labels.checked);
     store.set('labels', labels.checked);
   };
   labels.addEventListener('change', applyLabels);
@@ -1051,7 +1159,7 @@
   altBox.checked = store.get('alt', true);
   altBox.addEventListener('change', () => { store.set('alt', altBox.checked); applyAlt(); });
 
-  const applyFar = () => document.body.classList.toggle('labels-far', map.getZoom() < 4);
+  const applyFar = () => toggleLabels('labels-far', map.getZoom() < 4);
   map.on('zoomend', applyFar);
   applyFar();
 

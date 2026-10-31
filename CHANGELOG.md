@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 – 2026-10-31
+
+* Folder and SSH: a save Factorio is still writing (`name.tmp.zip`), or one left over from a save that was cut off,
+  is no longer taken as the newest save; such a file failed with "not a zip archive".
+
 ## 0.1.1 – 2026-10-29
 
 * Supported versions made explicit: saves from Factorio 1.0 up to 2.1.24 (tested). A save of a newer version is

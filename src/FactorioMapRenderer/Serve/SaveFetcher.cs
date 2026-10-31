@@ -85,20 +85,24 @@ public static partial class SaveFetcher
             throw new SaveSourceException("The SSH port must be between 1 and 65535.");
     }
 
-    /// <summary>The newest .zip in the folder (or the file itself), with its time and size; null if there is none.</summary>
+    /// <summary>The newest .zip in the folder (or the file itself), with its time and size; null if there is none.
+    /// Factorio writes a save as name.tmp.zip first and renames it when it is complete; those are left out, as one
+    /// is unfinished or left over from a save that was cut off.</summary>
     private static async Task<(string Path, DateTime Modified, long Size)?> NewestAsync(SaveSource source, CancellationToken cancel)
     {
         if (source.Kind == SaveSource.Folder)
         {
             var file = File.Exists(source.FolderPath)
                 ? new FileInfo(source.FolderPath)
-                : new DirectoryInfo(source.FolderPath).EnumerateFiles("*.zip", SearchOption.AllDirectories).MaxBy(f => f.LastWriteTimeUtc);
+                : new DirectoryInfo(source.FolderPath).EnumerateFiles("*.zip", SearchOption.AllDirectories)
+                    .Where(f => !f.Name.EndsWith(".tmp.zip", StringComparison.OrdinalIgnoreCase))
+                    .MaxBy(f => f.LastWriteTimeUtc);
             return file is null ? null : (file.FullName, file.LastWriteTimeUtc, file.Length);
         }
         string path = source.SshPath.Trim();
         string quoted = path.StartsWith("~/", StringComparison.Ordinal) ? "~/" + Quote(path[2..]) : Quote(path);
         string listing = await SshAsync(source,
-            $"find {quoted} -type f -name '*.zip' -printf '%T@ %s %p\\n' 2>/dev/null | sort -rn | head -n 1", null, cancel);
+            $"find {quoted} -type f -name '*.zip' ! -name '*.tmp.zip' -printf '%T@ %s %p\\n' 2>/dev/null | sort -rn | head -n 1", null, cancel);
         var parts = listing.Trim().Split(' ', 3);
         if (parts.Length < 3)
             return null;
